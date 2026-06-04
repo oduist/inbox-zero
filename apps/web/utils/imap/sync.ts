@@ -96,7 +96,14 @@ async function fetchPending(
 
   for await (const message of client.fetch(
     range,
-    { uid: true, flags: true, envelope: true, bodyStructure: true },
+    {
+      uid: true,
+      flags: true,
+      envelope: true,
+      bodyStructure: true,
+      // ENVELOPE in-reply-to is unreliable across servers; read the headers.
+      headers: ["in-reply-to", "references"],
+    },
     { uid: true },
   )) {
     // `n:*` always returns at least the last message even when none are newer.
@@ -113,11 +120,19 @@ function toPending(message: FetchMessageObject): PendingMessage {
   const from = envelope?.from?.[0];
   const fromAddr = from ? (from.address ?? from.name ?? "") : "";
 
+  const headers = parseHeaderLines(message.headers);
+  const inReplyTo =
+    normalizeMessageId(headers["in-reply-to"]) ??
+    normalizeMessageId(envelope?.inReplyTo);
+  const references = headers.references
+    ? parseReferences(headers.references).join(" ") || null
+    : inReplyTo;
+
   return {
     uid: message.uid,
     messageId: normalizeMessageId(envelope?.messageId),
-    inReplyTo: normalizeMessageId(envelope?.inReplyTo),
-    references: extractReferences(message),
+    inReplyTo,
+    references,
     fromAddr,
     subject: envelope?.subject ?? null,
     date: envelope?.date ?? new Date(0),
@@ -126,6 +141,20 @@ function toPending(message: FetchMessageObject): PendingMessage {
     hasAttachments: hasAttachments(message.bodyStructure),
     snippet: null,
   };
+}
+
+function parseHeaderLines(
+  raw: FetchMessageObject["headers"],
+): Record<string, string> {
+  if (!raw) return {};
+  const text = raw.toString("utf8");
+  const result: Record<string, string> = {};
+  // Unfold continuation lines, then split into "name: value" pairs.
+  for (const line of text.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/)) {
+    const match = line.match(/^([\w-]+):\s*(.*)$/);
+    if (match) result[match[1].toLowerCase()] = match[2].trim();
+  }
+  return result;
 }
 
 async function persistMessages({
@@ -236,13 +265,6 @@ function findExistingThreadId(
     }
   }
   return;
-}
-
-function extractReferences(message: FetchMessageObject): string | null {
-  // imapflow envelope has no references; derive from in-reply-to as a fallback.
-  // A fuller implementation can FETCH the References header explicitly.
-  const inReplyTo = normalizeMessageId(message.envelope?.inReplyTo);
-  return inReplyTo ? inReplyTo : null;
 }
 
 function hasAttachments(
