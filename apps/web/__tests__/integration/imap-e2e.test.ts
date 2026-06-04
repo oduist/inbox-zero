@@ -133,7 +133,93 @@ describe.skipIf(!enabled)("IMAP provider e2e", { timeout: 60_000 }, () => {
     });
     expect(inboxRows).toBe(0);
   });
+
+  it("delivers an SMTP send and picks it up on the next resync", async () => {
+    const pool = await getImapPoolForEmail({ emailAccountId });
+    const before = await prisma.imapMessage.count({
+      where: { emailAccountId, folder: "INBOX" },
+    });
+
+    await provider.sendEmail({
+      to: RECIPIENT,
+      subject: "SMTP delivered",
+      messageText: "Sent through the provider over SMTP.",
+    });
+    await wait(500);
+    await syncFolder({ pool, emailAccountId, folder: "INBOX" });
+
+    const messages = await provider.getInboxMessages(50);
+    expect(messages.some((m) => m.subject === "SMTP delivered")).toBe(true);
+
+    const after = await prisma.imapMessage.count({
+      where: { emailAccountId, folder: "INBOX" },
+    });
+    expect(after).toBe(before + 1);
+  });
+
+  it("creates a draft via APPEND and reads it back", async () => {
+    const pool = await getImapPoolForEmail({ emailAccountId });
+    await pool.withConnection((c) => c.mailboxCreate("Drafts").catch(() => {}));
+
+    // Recreate the provider so it resolves the now-existing Drafts folder.
+    const draftProvider = await ImapProvider.create({ emailAccountId, logger });
+    const { id } = await draftProvider.createDraft({
+      to: "bob@example.com",
+      subject: "My draft",
+      messageHtml: "<p>draft body</p>",
+    });
+
+    const draft = await draftProvider.getDraft(id);
+    expect(draft?.subject).toBe("My draft");
+
+    const drafts = await draftProvider.getDrafts();
+    expect(drafts.some((d) => d.id === id)).toBe(true);
+  });
+
+  it("fully resyncs a folder when UIDVALIDITY changes", async () => {
+    const pool = await getImapPoolForEmail({ emailAccountId });
+
+    // Ensure the inbox has at least one message, independent of prior tests.
+    await sendSimple("UIDVALIDITY resync target");
+    await wait(500);
+    await syncFolder({ pool, emailAccountId, folder: "INBOX" });
+
+    const rowsBefore = await prisma.imapMessage.findMany({
+      where: { emailAccountId, folder: "INBOX" },
+    });
+    const oldIds = rowsBefore.map((r) => r.id);
+    expect(oldIds.length).toBeGreaterThan(0);
+
+    // Simulate a server UIDVALIDITY change by poisoning the stored state.
+    const account = await prisma.emailAccount.findUniqueOrThrow({
+      where: { id: emailAccountId },
+      select: { imapFolderState: true },
+    });
+    const state =
+      (account.imapFolderState as Record<
+        string,
+        { uidValidity: string; highestUid: number }
+      > | null) ?? {};
+    state.INBOX = { uidValidity: "999999999", highestUid: 0 };
+    await prisma.emailAccount.update({
+      where: { id: emailAccountId },
+      data: { imapFolderState: state },
+    });
+
+    await syncFolder({ pool, emailAccountId, folder: "INBOX" });
+
+    const rowsAfter = await prisma.imapMessage.findMany({
+      where: { emailAccountId, folder: "INBOX" },
+    });
+    // Same messages, but fresh rows: the stale ones were dropped and re-added.
+    expect(rowsAfter.length).toBe(rowsBefore.length);
+    expect(rowsAfter.every((r) => !oldIds.includes(r.id))).toBe(true);
+  });
 });
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function purgeInbox(
   pool: Awaited<ReturnType<typeof getImapPoolForEmail>>,
@@ -174,6 +260,21 @@ async function seedThread() {
 
   // Give GreenMail a moment to deliver before syncing.
   await new Promise((resolve) => setTimeout(resolve, 500));
+}
+
+async function sendSimple(subject: string) {
+  const transport = nodemailer.createTransport({
+    host,
+    port: smtpPort,
+    secure: false,
+    auth: { user, pass },
+  });
+  await transport.sendMail({
+    from: "alice@example.com",
+    to: RECIPIENT,
+    subject,
+    text: subject,
+  });
 }
 
 async function cleanup() {

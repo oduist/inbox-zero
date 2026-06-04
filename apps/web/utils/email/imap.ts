@@ -48,6 +48,7 @@ export class ImapProvider implements EmailProvider {
   readonly name = "imap" as const;
   private readonly pool: ImapPool;
   private readonly emailAccountId: string;
+  private readonly emailAddress: string;
   private readonly special: SpecialFolders;
   private readonly capabilities: ImapCapabilities;
   private readonly logger: Logger;
@@ -55,12 +56,14 @@ export class ImapProvider implements EmailProvider {
   constructor(args: {
     pool: ImapPool;
     emailAccountId: string;
+    emailAddress: string;
     special: SpecialFolders;
     capabilities: ImapCapabilities;
     logger: Logger;
   }) {
     this.pool = args.pool;
     this.emailAccountId = args.emailAccountId;
+    this.emailAddress = args.emailAddress;
     this.special = args.special;
     this.capabilities = args.capabilities;
     this.logger = args.logger;
@@ -76,7 +79,7 @@ export class ImapProvider implements EmailProvider {
     const pool = await getImapPoolForEmail({ emailAccountId });
     const account = await prisma.emailAccount.findUnique({
       where: { id: emailAccountId },
-      select: { imapSpecialFolders: true },
+      select: { email: true, imapSpecialFolders: true },
     });
     const override =
       (account?.imapSpecialFolders as
@@ -90,6 +93,7 @@ export class ImapProvider implements EmailProvider {
     return new ImapProvider({
       pool,
       emailAccountId,
+      emailAddress: account?.email ?? "",
       special,
       capabilities,
       logger,
@@ -1166,8 +1170,13 @@ export class ImapProvider implements EmailProvider {
 
   private async send(options: Mail.Options): Promise<{ messageId: string }> {
     const config = await getSmtpConfig({ emailAccountId: this.emailAccountId });
-    const result = await sendViaSmtp(config, options);
-    await this.appendToSent(options);
+    // SMTP requires a From; the account's own address is the default sender.
+    const withFrom: Mail.Options = {
+      ...options,
+      from: options.from ?? this.emailAddress,
+    };
+    const result = await sendViaSmtp(config, withFrom);
+    await this.appendToSent(withFrom);
     return result;
   }
 
