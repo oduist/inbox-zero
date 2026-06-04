@@ -7,6 +7,7 @@ import type { EmailLabel, EmailLabels } from "@/providers/email-label-types";
 import { OUTLOOK_COLOR_MAP } from "@/utils/outlook/label";
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 
@@ -25,6 +26,11 @@ export const useEmail = () => useContext<Context>(EmailContext);
 // biome-ignore lint/suspicious/noExplicitAny: existing loose external shape
 function mapLabelColor(provider: string, label: any): EmailLabel["color"] {
   if (!provider) {
+    return;
+  }
+
+  if (isImapProvider(provider)) {
+    // IMAP folders have no server-side color.
     return;
   }
 

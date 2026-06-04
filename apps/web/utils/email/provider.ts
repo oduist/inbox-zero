@@ -4,6 +4,7 @@ import {
 } from "@/utils/email-account-client";
 import { GmailProvider } from "@/utils/email/google";
 import { OutlookProvider } from "@/utils/email/microsoft";
+import { ImapProvider } from "@/utils/email/imap";
 import type { EmailProvider } from "@/utils/email/types";
 import { assertProviderNotRateLimited } from "@/utils/email/rate-limit";
 import { toRateLimitProvider } from "@/utils/email/rate-limit-mode-error";
@@ -31,6 +32,10 @@ export async function createEmailProvider({
   if (rateLimitProvider === "google") {
     const client = await getGmailClientForEmail({ emailAccountId, logger });
     return new GmailProvider(client, logger, emailAccountId);
+  }
+
+  if (rateLimitProvider === "imap") {
+    return ImapProvider.create({ emailAccountId, logger });
   }
 
   const client = await getOutlookClientForEmail({ emailAccountId, logger });
