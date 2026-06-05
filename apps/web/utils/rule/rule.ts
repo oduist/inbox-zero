@@ -12,7 +12,10 @@ import {
   ruleHistoryRuleInclude,
   type RuleHistoryTrigger,
 } from "@/utils/rule/rule-history";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { createEmailProvider } from "@/utils/email/provider";
 import { resolveLabelNameAndId } from "@/utils/label/resolve-label";
 import { getMissingRecipientMessage } from "@/utils/rule/recipient-validation";
@@ -818,11 +821,14 @@ async function mapActionFields(
         labelId = resolved.labelId;
       }
 
+      const isFolderProvider =
+        isMicrosoftProvider(provider) || isImapProvider(provider);
+
       if (
         a.type === ActionType.MOVE_FOLDER &&
         folderName &&
         !folderId &&
-        isMicrosoftProvider(provider)
+        isFolderProvider
       ) {
         const emailProvider = await createEmailProvider({
           emailAccountId,
@@ -844,7 +850,7 @@ async function mapActionFields(
         subject: a.fields?.subject,
         content: a.fields?.content,
         url: a.fields?.webhookUrl,
-        ...(isMicrosoftProvider(provider) && {
+        ...(isFolderProvider && {
           folderName: folderName ?? null,
           folderId,
         }),
