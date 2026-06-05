@@ -49,7 +49,9 @@ export function parseQuery(query: string | undefined): ParsedQuery {
 export function buildWhere(
   parsed: ParsedQuery,
   emailAccountId: string,
+  options?: { includeText?: boolean },
 ): Prisma.ImapMessageWhereInput {
+  const includeText = options?.includeText ?? true;
   const and: Prisma.ImapMessageWhereInput[] = [{ emailAccountId }];
 
   if (parsed.from)
@@ -63,13 +65,18 @@ export function buildWhere(
   if (parsed.isUnread !== undefined) and.push({ flagsSeen: !parsed.isUnread });
   if (parsed.hasAttachment) and.push({ hasAttachments: true });
 
-  for (const word of parsed.text) {
-    and.push({
-      OR: [
-        { subject: { contains: word, mode: "insensitive" } },
-        { fromAddr: { contains: word, mode: "insensitive" } },
-      ],
-    });
+  // Free text matches subject/sender from the mirror. Body matching is handled
+  // separately via server-side SEARCH BODY (the body is not mirrored), so
+  // callers can omit text here and OR in the body hits.
+  if (includeText) {
+    for (const word of parsed.text) {
+      and.push({
+        OR: [
+          { subject: { contains: word, mode: "insensitive" } },
+          { fromAddr: { contains: word, mode: "insensitive" } },
+        ],
+      });
+    }
   }
 
   return and.length === 1 ? and[0] : { AND: and };

@@ -406,7 +406,10 @@ export class ImapProvider implements EmailProvider {
   }): Promise<{ messages: ParsedMessage[]; nextPageToken?: string }> {
     const parsed = parseQuery(options.query);
     if (options.readState) parsed.isUnread = options.readState === "unread";
-    const where = buildWhere(parsed, this.emailAccountId);
+    const folders = options.labelName
+      ? [options.labelName]
+      : this.searchFolders();
+    const where = await this.buildSearchWhere(parsed, folders);
     const folderWhere = options.labelName
       ? { ...where, folder: options.labelName }
       : where;
@@ -430,7 +433,10 @@ export class ImapProvider implements EmailProvider {
     if (options.after) parsed.after = options.after;
     if (options.before) parsed.before = options.before;
     if (options.unreadOnly) parsed.isUnread = true;
-    const where = buildWhere(parsed, this.emailAccountId);
+    const folders = options.inboxOnly
+      ? [this.special.inbox]
+      : this.searchFolders();
+    const where = await this.buildSearchWhere(parsed, folders);
     const finalWhere = options.inboxOnly
       ? { ...where, folder: this.special.inbox }
       : where;
@@ -1036,6 +1042,75 @@ export class ImapProvider implements EmailProvider {
       });
     }
     return threads;
+  }
+
+  // Folders to include in a body search when the query is not scoped to one.
+  private searchFolders(): string[] {
+    return [this.special.inbox, this.special.archive, this.special.sent].filter(
+      (f): f is string => Boolean(f),
+    );
+  }
+
+  /**
+   * Builds the mirror `where` for a query. Free-text terms match subject/sender
+   * in the mirror; since the message body is not mirrored, we additionally run a
+   * server-side SEARCH BODY across the given folders and OR in those rows (still
+   * subject to the query's structural filters).
+   */
+  private async buildSearchWhere(
+    parsed: ReturnType<typeof parseQuery>,
+    folders: string[],
+  ): Promise<Prisma.ImapMessageWhereInput> {
+    const metaWhere = buildWhere(parsed, this.emailAccountId);
+    if (parsed.text.length === 0) return metaWhere;
+
+    const bodyRowIds = await this.bodySearchRowIds(parsed.text, folders);
+    if (bodyRowIds.length === 0) return metaWhere;
+
+    const structuralWhere = buildWhere(parsed, this.emailAccountId, {
+      includeText: false,
+    });
+    return {
+      OR: [metaWhere, { AND: [structuralWhere, { id: { in: bodyRowIds } }] }],
+    };
+  }
+
+  private async bodySearchRowIds(
+    terms: string[],
+    folders: string[],
+  ): Promise<string[]> {
+    const ids: string[] = [];
+    for (const folder of folders) {
+      const uids = await this.bodySearchUids(terms, folder);
+      if (uids.length === 0) continue;
+      const rows = await prisma.imapMessage.findMany({
+        where: {
+          emailAccountId: this.emailAccountId,
+          folder,
+          uid: { in: uids.map((u) => BigInt(u)) },
+        },
+        select: { id: true },
+      });
+      ids.push(...rows.map((r) => r.id));
+    }
+    return ids;
+  }
+
+  // Server-side SEARCH BODY for each term, intersected (AND) — returns UIDs.
+  private async bodySearchUids(
+    terms: string[],
+    folder: string,
+  ): Promise<number[]> {
+    return this.pool.withMailbox(folder, async (client) => {
+      let acc: number[] | null = null;
+      for (const term of terms) {
+        const result = await client.search({ body: term }, { uid: true });
+        const found = Array.isArray(result) ? result : [];
+        acc = acc === null ? found : acc.filter((u) => found.includes(u));
+        if (acc.length === 0) return [];
+      }
+      return acc ?? [];
+    });
   }
 
   private async pageMessages(

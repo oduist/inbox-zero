@@ -259,6 +259,48 @@ describe.skipIf(!enabled)("IMAP provider e2e", { timeout: 60_000 }, () => {
     });
     expect(secondAfter).toBeNull();
   });
+
+  it("finds a message by a word only in its body (server SEARCH BODY)", async () => {
+    const pool = await getImapPoolForEmail({ emailAccountId });
+    await purgeInbox(pool);
+    await prisma.imapMessage.deleteMany({
+      where: { emailAccountId, folder: "INBOX" },
+    });
+
+    const transport = nodemailer.createTransport({
+      host,
+      port: smtpPort,
+      secure: false,
+      auth: { user, pass },
+    });
+    // The unique token appears only in the body, not the subject or sender.
+    await transport.sendMail({
+      from: "alice@example.com",
+      to: RECIPIENT,
+      subject: "Quarterly update",
+      text: "Please review the zephyrquux figures before Friday.",
+    });
+    await wait(500);
+    await syncFolder({ pool, emailAccountId, folder: "INBOX" });
+
+    // Mirror-only search (subject/from) must not find it...
+    const mirrorOnly = await prisma.imapMessage.findMany({
+      where: {
+        emailAccountId,
+        OR: [
+          { subject: { contains: "zephyrquux", mode: "insensitive" } },
+          { fromAddr: { contains: "zephyrquux", mode: "insensitive" } },
+        ],
+      },
+    });
+    expect(mirrorOnly.length).toBe(0);
+
+    // ...but the provider search finds it via server-side SEARCH BODY.
+    const result = await provider.searchMessages({ query: "zephyrquux" });
+    expect(result.messages.some((m) => m.subject === "Quarterly update")).toBe(
+      true,
+    );
+  });
 });
 
 function wait(ms: number) {
