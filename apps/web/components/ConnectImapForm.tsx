@@ -18,14 +18,25 @@ export function ConnectImapForm({ onSuccess }: { onSuccess?: () => void }) {
 
   const onSubmit = handleSubmit(async (values) => {
     const result = await connectImapAccountAction({
-      ...values,
+      email: values.email,
+      imapHost: values.imapHost,
+      imapPort: values.imapPort,
+      imapSecure: values.imapSecure,
       imapUsername: values.imapUsername || values.email,
+      imapPassword: values.imapPassword,
+      // Blank optional fields must be omitted, not sent as "" / NaN.
+      smtpHost: values.smtpHost || undefined,
+      smtpPort: Number.isFinite(values.smtpPort) ? values.smtpPort : undefined,
     });
 
-    if (result?.serverError) {
+    // Treat anything that is not an explicit success as a failure, so a
+    // validation error never looks like a successful connection.
+    if (!result?.data?.success) {
       toastError({
         title: "Could not connect",
-        description: result.serverError,
+        description:
+          result?.serverError ??
+          "Please check the server details and try again.",
       });
       return;
     }

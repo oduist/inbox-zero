@@ -17,16 +17,14 @@ export const connectImapAccountAction = actionClientUser
   .schema(connectImapBody)
   .action(async ({ ctx: { userId }, parsedInput }) => {
     const email = parsedInput.email.trim().toLowerCase();
+    const username = parsedInput.imapUsername ?? email;
 
     try {
       await verifyImapConnection({
         host: parsedInput.imapHost,
         port: parsedInput.imapPort,
         secure: parsedInput.imapSecure,
-        auth: {
-          user: parsedInput.imapUsername,
-          pass: parsedInput.imapPassword,
-        },
+        auth: { user: username, pass: parsedInput.imapPassword },
       });
     } catch {
       throw new SafeError(
@@ -50,7 +48,7 @@ export const connectImapAccountAction = actionClientUser
           imapHost: parsedInput.imapHost,
           imapPort: parsedInput.imapPort,
           imapSecure: parsedInput.imapSecure,
-          imapUsername: parsedInput.imapUsername,
+          imapUsername: username,
           imapPassword: encryptedPassword,
           smtpHost: parsedInput.smtpHost ?? null,
           smtpPort: parsedInput.smtpPort ?? null,
