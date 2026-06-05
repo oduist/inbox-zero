@@ -5,6 +5,8 @@ import { isDefined } from "@/utils/types";
 import prisma from "@/utils/prisma";
 import { isIgnoredSender } from "@/utils/filter-ignored-senders";
 import type { EmailProvider } from "@/utils/email/types";
+import { isImapProvider } from "@/utils/email/provider-types";
+import { syncImapAccount } from "@/utils/imap/sync-account";
 
 export const maxDuration = 30;
 
@@ -36,6 +38,19 @@ export const GET = withEmailProvider(
       before,
       isUnread,
     });
+
+    // IMAP has no push; refresh the mirror when the first page is loaded.
+    // Incremental sync is cheap, so this doubles as a pull-to-refresh.
+    if (isImapProvider(emailProvider.name) && !query.nextPageToken) {
+      try {
+        await syncImapAccount({ emailAccountId, initialLimit: 50 });
+      } catch (error) {
+        request.logger.warn("IMAP inbox sync failed", {
+          emailAccountId,
+          error,
+        });
+      }
+    }
 
     try {
       const threads = await getThreads({
