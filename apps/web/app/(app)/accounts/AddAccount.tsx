@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { toastError } from "@/components/Toast";
 import Image from "next/image";
@@ -9,6 +10,15 @@ import { MutedText } from "@/components/Typography";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
 import { isGoogleProvider } from "@/utils/email/provider-types";
 import { redirectToSafeUrl } from "@/utils/redirect";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { ConnectImapForm } from "@/components/ConnectImapForm";
 
 export function AddAccount({
   helperText = "You will be billed for each account.",
@@ -17,6 +27,8 @@ export function AddAccount({
 }) {
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const [isLoadingMicrosoft, setIsLoadingMicrosoft] = useState(false);
+  const [isImapOpen, setIsImapOpen] = useState(false);
+  const router = useRouter();
 
   const handleAddAccount = async (provider: "google" | "microsoft") => {
     const setLoading = isGoogleProvider(provider)
@@ -72,6 +84,32 @@ export function AddAccount({
           />
           <span className="ml-2">Add Microsoft</span>
         </Button>
+        <Dialog open={isImapOpen} onOpenChange={setIsImapOpen}>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={isLoadingGoogle || isLoadingMicrosoft}
+            >
+              <span className="ml-2">Add IMAP</span>
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Connect an IMAP account</DialogTitle>
+              <DialogDescription>
+                Enter your IMAP/SMTP server details. Your password is stored
+                encrypted.
+              </DialogDescription>
+            </DialogHeader>
+            <ConnectImapForm
+              onSuccess={() => {
+                setIsImapOpen(false);
+                router.refresh();
+              }}
+            />
+          </DialogContent>
+        </Dialog>
       </div>
 
       <MutedText>{helperText}</MutedText>
