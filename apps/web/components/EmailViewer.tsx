@@ -37,7 +37,9 @@ export function EmailViewer() {
           )
         ) : (
           <div className="flex h-full items-center justify-center">
-            <MutedText>This feature isn't enabled for Outlook.</MutedText>
+            <MutedText>
+              This feature isn't enabled for this provider yet.
+            </MutedText>
           </div>
         )}
       </SheetContent>

@@ -3,7 +3,7 @@ import { withEmailProvider } from "@/utils/middleware";
 import { messageQuerySchema } from "@/app/api/messages/validation";
 import { GmailLabel } from "@/utils/gmail/label";
 import type { EmailProvider } from "@/utils/email/types";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import { isGoogleProvider, isImapProvider } from "@/utils/email/provider-types";
 import type { Logger } from "@/utils/logger";
 
 export type MessagesResponse = Awaited<ReturnType<typeof getMessages>>;
@@ -66,6 +66,9 @@ async function getMessages({
       } else if (emailProvider.name === "microsoft") {
         // For Outlook, we already filter out drafts in the message fetching
         // No additional filtering needed here
+      } else if (isImapProvider(emailProvider.name)) {
+        // IMAP: hide messages we sent (they live in the Sent folder).
+        if (emailProvider.isSentMessage(message)) return false;
       }
 
       // Return all other messages
