@@ -16,13 +16,13 @@ Legend: ☐ todo · ☑ done · — leave as default (acceptable)
 - ☑ `app/api/messages/route.ts` — imap branch hides sent messages via `isSentMessage`.
 - ☑ `components/EmailViewer.tsx` — generic copy ("this provider") instead of "Outlook".
 
-## Priority 2 — rules & actions (imap supports moves, currently disabled)
+## Priority 2 — rules & actions (imap supports moves) — DONE
 
-- ☐ `utils/ai/rule/action-availability.ts:16` — `supportsMoveFolder` microsoft-only. Enable for imap.
-- ☐ `utils/rule/rule.ts:825,847` — MOVE_FOLDER folderId/folderName resolution microsoft-only. Add imap.
-- ☐ `utils/ai/rule/create-rule-schema.ts:262` — `folderName` schema field microsoft-only. Add imap.
-- ☐ `app/(app)/[emailAccountId]/onboarding/OnboardingCategories.tsx:257,266` — action select empty for imap. Add imap branch.
-- ☐ `utils/rule/consts.ts:153` — `getCategoryAction` default; verify correct for imap=folders.
+- ☑ `utils/ai/rule/action-availability.ts` — MOVE_FOLDER offered for imap.
+- ☑ `utils/rule/rule.ts` — MOVE_FOLDER folderId/folderName resolved+persisted for imap (folder-based).
+- ☑ `utils/ai/rule/create-rule-schema.ts` — `folderName` schema field for imap.
+- ☑ `app/(app)/[emailAccountId]/onboarding/OnboardingCategories.tsx` — imap shows "Move to folder".
+- ☑ `utils/rule/consts.ts` — `getCategoryAction` uses folder action for imap.
 
 ## Priority 3 — terminology / UX (medium)
 

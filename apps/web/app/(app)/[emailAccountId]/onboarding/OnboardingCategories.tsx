@@ -42,6 +42,7 @@ import { cn } from "@/utils";
 import { TooltipExplanation } from "@/components/TooltipExplanation";
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 import { MutedText } from "@/components/Typography";
@@ -271,6 +272,9 @@ function CategoryCard({
                     Label & archive after a week
                   </SelectItem> */}
                 </>
+              )}
+              {isImapProvider(provider) && (
+                <SelectItem value="move_folder">Move to folder</SelectItem>
               )}
               <SelectItem value="none">Do nothing</SelectItem>
             </SelectContent>
