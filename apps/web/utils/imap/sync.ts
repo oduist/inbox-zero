@@ -14,6 +14,7 @@ import { createScopedLogger } from "@/utils/logger";
 const logger = createScopedLogger("imap/sync");
 
 interface FolderSyncState {
+  highestModSeq?: string;
   highestUid: number;
   uidValidity: string;
 }
@@ -37,9 +38,13 @@ interface PendingMessage {
 }
 
 /**
- * Syncs a single folder into the ImapMessage mirror table. If UIDVALIDITY
- * changed since last sync we drop and re-sync the folder; otherwise we only
- * fetch messages with UID greater than the highest one we have seen.
+ * Syncs a single folder into the ImapMessage mirror table.
+ *
+ * - UIDVALIDITY changed → drop and re-sync the folder.
+ * - Otherwise, when the server has CONDSTORE/QRESYNC and we have a stored
+ *   MODSEQ, apply a cheap delta over already-synced UIDs: update changed flags
+ *   and drop expunged (VANISHED) messages.
+ * - New messages (UID greater than the highest seen) are always fetched in full.
  */
 export async function syncFolder({
   pool,
@@ -53,11 +58,34 @@ export async function syncFolder({
   return pool.withMailbox(folder, async (client) => {
     const mailbox = client.mailbox;
     const uidValidity = String(mailbox ? mailbox.uidValidity : 0);
+    const modSeq = mailbox ? mailbox.highestModseq : undefined;
+    const highestModSeq = modSeq ? String(modSeq) : undefined;
+    const condstore = client.capabilities.has("CONDSTORE");
     const state = await readFolderState({ emailAccountId, folder });
 
     let sinceUid = 0;
     if (state && state.uidValidity === uidValidity) {
       sinceUid = state.highestUid;
+      const useModSeqDelta = condstore && !!state.highestModSeq;
+      if (useModSeqDelta) {
+        await applyFlagDelta({
+          client,
+          emailAccountId,
+          folder,
+          uidValidity,
+          sinceModSeq: state.highestModSeq as string,
+          upToUid: state.highestUid,
+        });
+      }
+      await reconcileFolder({
+        client,
+        emailAccountId,
+        folder,
+        uidValidity,
+        upToUid: state.highestUid,
+        // Without a cheap MODSEQ delta, refresh flags during the same UID scan.
+        refreshAllFlags: !useModSeqDelta,
+      });
     } else if (state) {
       logger.info("UIDVALIDITY changed, full resync of folder", {
         emailAccountId,
@@ -69,9 +97,9 @@ export async function syncFolder({
     }
 
     const pending = await fetchPending(client, sinceUid);
-    if (pending.length === 0) return { added: 0 };
-
-    await persistMessages({ emailAccountId, folder, uidValidity, pending });
+    if (pending.length > 0) {
+      await persistMessages({ emailAccountId, folder, uidValidity, pending });
+    }
 
     const highestUid = pending.reduce(
       (max, m) => Math.max(max, m.uid),
@@ -80,11 +108,119 @@ export async function syncFolder({
     await writeFolderState({
       emailAccountId,
       folder,
-      state: { uidValidity, highestUid },
+      state: { uidValidity, highestUid, highestModSeq },
     });
 
     return { added: pending.length };
   });
+}
+
+/**
+ * CONDSTORE flag delta: re-reads flags only for messages changed since the
+ * stored MODSEQ (cheap — the server filters server-side). Bounded to
+ * `1:upToUid` so brand-new messages are left to the full fetch path.
+ */
+async function applyFlagDelta({
+  client,
+  emailAccountId,
+  folder,
+  uidValidity,
+  sinceModSeq,
+  upToUid,
+}: {
+  client: ImapFlow;
+  emailAccountId: string;
+  folder: string;
+  uidValidity: string;
+  sinceModSeq: string;
+  upToUid: number;
+}): Promise<void> {
+  if (upToUid <= 0) return;
+
+  for await (const message of client.fetch(
+    `1:${upToUid}`,
+    { uid: true, flags: true },
+    { uid: true, changedSince: BigInt(sinceModSeq) },
+  )) {
+    const flags = message.flags ?? new Set<string>();
+    await prisma.imapMessage.updateMany({
+      where: {
+        emailAccountId,
+        folder,
+        uidValidity: BigInt(uidValidity),
+        uid: BigInt(message.uid),
+      },
+      data: {
+        flagsSeen: flags.has("\\Seen"),
+        flagsFlagged: flags.has("\\Flagged"),
+      },
+    });
+  }
+}
+
+/**
+ * Lists current UIDs (uid-only fetch is cheap) and deletes mirror rows whose
+ * UID no longer exists on the server. QRESYNC VANISHED would be cheaper but is
+ * delivered as a session event our pooled connections do not carry, so we
+ * reconcile explicitly. Works on any server.
+ *
+ * When `refreshAllFlags` is set (no CONDSTORE delta available) it also re-reads
+ * flags in the same pass, so flag changes are still reflected — flags are tiny,
+ * so this stays cheap.
+ */
+async function reconcileFolder({
+  client,
+  emailAccountId,
+  folder,
+  uidValidity,
+  upToUid,
+  refreshAllFlags,
+}: {
+  client: ImapFlow;
+  emailAccountId: string;
+  folder: string;
+  uidValidity: string;
+  upToUid: number;
+  refreshAllFlags: boolean;
+}): Promise<void> {
+  if (upToUid <= 0) return;
+
+  const liveUids = new Set<bigint>();
+  for await (const message of client.fetch(
+    `1:${upToUid}`,
+    { uid: true, flags: refreshAllFlags },
+    { uid: true },
+  )) {
+    liveUids.add(BigInt(message.uid));
+
+    if (refreshAllFlags) {
+      const flags = message.flags ?? new Set<string>();
+      await prisma.imapMessage.updateMany({
+        where: {
+          emailAccountId,
+          folder,
+          uidValidity: BigInt(uidValidity),
+          uid: BigInt(message.uid),
+        },
+        data: {
+          flagsSeen: flags.has("\\Seen"),
+          flagsFlagged: flags.has("\\Flagged"),
+        },
+      });
+    }
+  }
+
+  const rows = await prisma.imapMessage.findMany({
+    where: { emailAccountId, folder, uidValidity: BigInt(uidValidity) },
+    select: { id: true, uid: true },
+  });
+  const expungedIds = rows
+    .filter((row) => !liveUids.has(row.uid))
+    .map((row) => row.id);
+
+  if (expungedIds.length > 0) {
+    await prisma.imapMessage.deleteMany({ where: { id: { in: expungedIds } } });
+  }
 }
 
 async function fetchPending(

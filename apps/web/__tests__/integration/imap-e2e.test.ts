@@ -215,6 +215,50 @@ describe.skipIf(!enabled)("IMAP provider e2e", { timeout: 60_000 }, () => {
     expect(rowsAfter.length).toBe(rowsBefore.length);
     expect(rowsAfter.every((r) => !oldIds.includes(r.id))).toBe(true);
   });
+
+  it("incremental sync reflects external flag changes and expunges", async () => {
+    const pool = await getImapPoolForEmail({ emailAccountId });
+
+    // Fresh, isolated state for this scenario.
+    await purgeInbox(pool);
+    await prisma.imapMessage.deleteMany({
+      where: { emailAccountId, folder: "INBOX" },
+    });
+    await sendSimple("delta one");
+    await sendSimple("delta two");
+    await wait(500);
+    await syncFolder({ pool, emailAccountId, folder: "INBOX" });
+
+    const rows = await prisma.imapMessage.findMany({
+      where: { emailAccountId, folder: "INBOX" },
+      orderBy: { uid: "asc" },
+    });
+    expect(rows.length).toBe(2);
+    expect(rows.every((r) => !r.flagsSeen)).toBe(true);
+
+    // Simulate another client: mark the first \Seen, expunge the second.
+    const [first, second] = rows;
+    await pool.withMailbox("INBOX", async (client) => {
+      await client.messageFlagsAdd(String(Number(first.uid)), ["\\Seen"], {
+        uid: true,
+      });
+      await client.messageDelete(String(Number(second.uid)), { uid: true });
+    });
+
+    await syncFolder({ pool, emailAccountId, folder: "INBOX" });
+
+    // Flag delta picked up the \Seen change.
+    const firstAfter = await prisma.imapMessage.findUnique({
+      where: { id: first.id },
+    });
+    expect(firstAfter?.flagsSeen).toBe(true);
+
+    // Reconcile removed the expunged message.
+    const secondAfter = await prisma.imapMessage.findUnique({
+      where: { id: second.id },
+    });
+    expect(secondAfter).toBeNull();
+  });
 });
 
 function wait(ms: number) {

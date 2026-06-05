@@ -73,6 +73,9 @@ export class ImapPool {
       secure: this.config.secure,
       auth: this.config.auth,
       logger: false,
+      // Prefer QRESYNC (expunges report UIDs) when the server supports it;
+      // imapflow falls back to CONDSTORE / plain operation otherwise.
+      qresync: true,
     });
     await client.connect();
     return client;
