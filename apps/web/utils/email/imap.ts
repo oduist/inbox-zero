@@ -997,7 +997,22 @@ export class ImapProvider implements EmailProvider {
 
   private async toMessage(row: ImapMessage): Promise<ParsedMessage> {
     const raw = await this.fetchSource(row);
-    return toParsedMessage(row, raw);
+    const message = await toParsedMessage(row, raw);
+    message.labelIds = this.folderLabelIds(row.folder);
+    return message;
+  }
+
+  // Maps the message's folder to the Gmail-style label ids the UI checks for
+  // (SENT/DRAFT/INBOX/...). Folders are the IMAP equivalent of those labels.
+  private folderLabelIds(folder: string): string[] {
+    const ids: string[] = [];
+    if (folder === this.special.inbox) ids.push("INBOX");
+    if (folder === this.special.sent) ids.push("SENT");
+    if (folder === this.special.drafts) ids.push("DRAFT");
+    if (folder === this.special.archive) ids.push("ARCHIVE");
+    if (folder === this.special.junk) ids.push("SPAM");
+    if (folder === this.special.trash) ids.push("TRASH");
+    return ids;
   }
 
   private async toMessages(rows: ImapMessage[]): Promise<ParsedMessage[]> {
