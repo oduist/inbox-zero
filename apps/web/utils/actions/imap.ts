@@ -6,7 +6,11 @@ import prisma from "@/utils/prisma";
 import { encryptToken } from "@/utils/encryption";
 import { verifyImapConnection } from "@/utils/imap/connection";
 import { isDuplicateError } from "@/utils/prisma-helpers";
+import { syncImapAccount } from "@/utils/imap/sync-account";
+import { createScopedLogger } from "@/utils/logger";
 import { SafeError } from "@/utils/error";
+
+const logger = createScopedLogger("actions/imap");
 
 export const connectImapAccountAction = actionClientUser
   .metadata({ name: "connectImapAccount" })
@@ -35,8 +39,9 @@ export const connectImapAccountAction = actionClientUser
       throw new SafeError("Encryption is not configured on this server.");
     }
 
+    let emailAccountId: string;
     try {
-      await prisma.account.create({
+      const account = await prisma.account.create({
         data: {
           userId,
           type: "imap",
@@ -57,12 +62,28 @@ export const connectImapAccountAction = actionClientUser
             },
           },
         },
+        include: { emailAccount: true },
       });
+      emailAccountId = account.emailAccount?.id ?? "";
     } catch (error) {
       if (isDuplicateError(error)) {
         throw new SafeError("This email account is already connected.");
       }
       throw error;
+    }
+
+    // Populate the inbox so the account is not empty on first view. Best-effort:
+    // a sync failure must not fail the connection itself.
+    try {
+      if (emailAccountId) {
+        await syncImapAccount({
+          emailAccountId,
+          initialLimit: 50,
+          includeAllFolders: true,
+        });
+      }
+    } catch (error) {
+      logger.warn("Initial IMAP sync failed", { email, error });
     }
 
     return { success: true };
