@@ -26,9 +26,13 @@ Legend: ☐ todo · ☑ done · — leave as default (acceptable)
 
 ## Priority 3 — terminology / UX (medium)
 
-- ☐ `app/(app)/[emailAccountId]/onboarding/StepInboxProcessed.tsx:92` — "labeled" vs folder wording.
-- ☐ `app/(app)/[emailAccountId]/reply-zero/ReplyTrackerEmails.tsx:59,387` — reply marked unsupported though SMTP send works.
-- ☐ `components/EmailMessageCellLabels.ts:73,77` — Archived badge not shown for imap (low priority).
+- ☑ `app/(app)/[emailAccountId]/onboarding/StepInboxProcessed.tsx` — imap says "filed".
+- — `app/(app)/[emailAccountId]/reply-zero/ReplyTrackerEmails.tsx:59,387` — leave gated.
+  The `isGmail` gate guards the **in-app reply/thread composer** (same Gmail-only
+  UI as `EmailViewer`), not the SMTP send capability. Enabling it for imap needs
+  the thread composer wired for imap first — out of scope. Revisit with the viewer.
+- — `components/EmailMessageCellLabels.ts:73,77` — leave default (Archived badge
+  cosmetic; low value for imap=folders).
 
 ## Leave as default (Gmail-only features hidden for imap — acceptable)
 
