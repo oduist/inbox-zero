@@ -13,7 +13,10 @@ import { Badge, type Color } from "@/components/Badge";
 import { getActionColor } from "@/components/PlanBadge";
 import { ActionType, SystemType } from "@/generated/prisma/enums";
 import { formatShortDate, internalDateToDate } from "@/utils/date";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { getEmailTerminology } from "@/utils/terminology";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { captureException } from "@/utils/error";
@@ -89,7 +92,9 @@ export function StepInboxProcessedView({
 }) {
   const hasEmails = !!data && data.emails.length > 0;
   const { label } = getEmailTerminology(provider);
-  const pastVerb = isMicrosoftProvider(provider) ? "categorized" : "labeled";
+  let pastVerb = "labeled";
+  if (isMicrosoftProvider(provider)) pastVerb = "categorized";
+  else if (isImapProvider(provider)) pastVerb = "filed";
   const hasDrafts = (data?.draftCount ?? 0) > 0;
 
   return (

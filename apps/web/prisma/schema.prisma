@@ -11,24 +11,35 @@ generator client {
 
 // Account, User, Session, and VerificationToken based on: https://authjs.dev/reference/adapter/prisma
 model Account {
-  id                    String        @id @default(cuid())
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  id                    String    @id @default(cuid())
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
   userId                String
   provider              String
-  type                  String        @default("oidc") // next-auth deprecated field
+  type                  String    @default("oidc") // next-auth deprecated field
   providerAccountId     String
-  refresh_token         String?       @db.Text
+  refresh_token         String?   @db.Text
   refreshTokenExpiresAt DateTime?
-  access_token          String?       @db.Text
-  expires_at            DateTime?     @default(now())
+  access_token          String?   @db.Text
+  expires_at            DateTime? @default(now())
   disconnectedAt        DateTime? // When OAuth tokens were invalidated (password change, revoked access)
   token_type            String?
   scope                 String?
-  id_token              String?       @db.Text
+  id_token              String?   @db.Text
   session_state         String?
-  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailAccount          EmailAccount?
+
+  // IMAP/SMTP connection config (provider == "imap"). Password is encrypted at rest.
+  imapHost     String?
+  imapPort     Int?
+  imapSecure   Boolean? @default(true)
+  imapUsername String?
+  imapPassword String?  @db.Text // AES-GCM encrypted
+  smtpHost     String?
+  smtpPort     Int?
+  smtpSecure   Boolean? @default(true)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailAccount EmailAccount?
 
   @@unique([provider, providerAccountId])
   @@index([userId])
@@ -102,8 +113,8 @@ model User {
   emailAccounts EmailAccount[]
 
   // Referral relationships
-  referralsMade    Referral[] @relation("ReferrerUser")
-  referralReceived Referral?  @relation("ReferredUser")
+  referralsMade    Referral[]     @relation("ReferrerUser")
+  referralReceived Referral?      @relation("ReferredUser")
   scimProviders    ScimProvider[]
 }
 
@@ -134,11 +145,16 @@ model EmailAccount {
   watchEmailsSubscriptionId      String? // For Outlook subscription ID
   watchEmailsSubscriptionHistory Json? // Historical Outlook subscription IDs: [{ subscriptionId, createdAt, replacedAt }]
   lastSyncedHistoryId            String?
-  behaviorProfile                Json?
-  personaAnalysis                Json? // ai analysis of the user's persona
-  role                           String? // the role confirmed by the user - previously `User.surveyRole`
-  timezone                       String? // User's timezone (IANA tz database format, e.g., "America/Los_Angeles", "Asia/Jerusalem") - handles DST automatically
-  calendarBookingLink            String? // User's calendar booking link
+
+  // IMAP special-folder overrides (used when SPECIAL-USE is unavailable) and folder sync state
+  imapSpecialFolders Json? // { sent, archive, trash, junk, drafts }
+  imapFolderState    Json? // per-folder: { [folderPath]: { uidValidity, highestUid, highestModSeq } }
+
+  behaviorProfile     Json?
+  personaAnalysis     Json? // ai analysis of the user's persona
+  role                String? // the role confirmed by the user - previously `User.surveyRole`
+  timezone            String? // User's timezone (IANA tz database format, e.g., "America/Los_Angeles", "Asia/Jerusalem") - handles DST automatically
+  calendarBookingLink String? // User's calendar booking link
 
   statsEmailFrequency       Frequency            @default(WEEKLY)
   summaryEmailFrequency     Frequency            @default(WEEKLY)
@@ -211,11 +227,44 @@ model EmailAccount {
   filingFolders          FilingFolder[]
   apiKeys                ApiKey[]
   classificationFeedback ClassificationFeedback[]
+  imapMessages           ImapMessage[]
 
   @@index([userId])
   @@index([lastSummaryEmailAt])
   @@index([watchEmailsSubscriptionId])
   @@index([watchEmailsSubscriptionHistory(ops: JsonbPathOps)], type: Gin)
+}
+
+// Mirror table for IMAP accounts: gives messages a stable app-facing id that survives
+// folder moves (UID changes on MOVE) and caches metadata for fast threading/search.
+model ImapMessage {
+  id             String   @id @default(cuid())
+  emailAccountId String
+  folder         String // current mailbox path
+  uidValidity    BigInt // mailbox UIDVALIDITY at sync time
+  uid            BigInt // UID within (folder, uidValidity)
+  messageIdHdr   String? // RFC822 Message-ID header
+  threadId       String // synthetic thread id (jwz or server THREAD)
+  inReplyTo      String?
+  references     String? // space-separated message-ids
+  fromAddr       String
+  subject        String?
+  date           DateTime
+  flagsSeen      Boolean  @default(false)
+  flagsFlagged   Boolean  @default(false)
+  hasAttachments Boolean  @default(false)
+  snippet        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  emailAccount EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([emailAccountId, folder, uidValidity, uid])
+  @@index([emailAccountId, threadId])
+  @@index([emailAccountId, messageIdHdr])
+  @@index([emailAccountId, fromAddr])
+  @@index([emailAccountId, folder])
+  @@index([emailAccountId, date])
 }
 
 model Organization {
@@ -878,8 +927,8 @@ model ThreadTracker {
   resolved  Boolean           @default(false)
   type      ThreadTrackerType
 
-  followUpAppliedAt DateTime?
-  followUpDraftId   String?
+  followUpAppliedAt     DateTime?
+  followUpDraftId       String?
   followUpNotifications Json?
 
   emailAccountId String
@@ -1220,20 +1269,20 @@ model Booking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  guestName           String
-  guestEmail          String
-  guestNote           String?
-  startTime           DateTime
-  endTime             DateTime
+  guestName            String
+  guestEmail           String
+  guestNote            String?
+  startTime            DateTime
+  endTime              DateTime
   status               BookingStatus @default(PENDING_PROVIDER_EVENT)
   provider             String?
   providerConnectionId String?
   providerCalendarId   String?
   providerEventId      String?
   videoConferenceLink  String?
-  cancelTokenHash     String
-  cancellationReason  String?
-  idempotencyToken    String?
+  cancelTokenHash      String
+  cancellationReason   String?
+  idempotencyToken     String?
 
   bookingLinkId  String
   bookingLink    BookingLink  @relation(fields: [bookingLinkId], references: [id], onDelete: Cascade)
@@ -1439,10 +1488,10 @@ model DocumentFiling {
   emailAccountId    String
   emailAccount      EmailAccount    @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
 
+  @@unique([emailAccountId, messageId, attachmentId])
   @@index([emailAccountId, status])
   @@index([driveConnectionId])
   @@index([messageId])
-  @@unique([emailAccountId, messageId, attachmentId])
 }
 
 model AttachmentSource {

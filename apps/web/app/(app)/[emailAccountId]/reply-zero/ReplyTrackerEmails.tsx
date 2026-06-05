@@ -34,7 +34,7 @@ import { CommandShortcut } from "@/components/ui/command";
 import { useTableKeyboardNavigation } from "@/hooks/useTableKeyboardNavigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAccount } from "@/providers/EmailAccountProvider";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import { isGoogleProvider, isImapProvider } from "@/utils/email/provider-types";
 import { MutedText } from "@/components/Typography";
 import { BRAND_NAME } from "@/utils/branding";
 
@@ -56,7 +56,7 @@ export function ReplyTrackerEmails({
   isAnalyzing: boolean;
 }) {
   const { provider } = useAccount();
-  const isGmail = isGoogleProvider(provider);
+  const canReplyInApp = isGoogleProvider(provider) || isImapProvider(provider);
 
   const [selectedEmail, setSelectedEmail] = useState<{
     threadId: string;
@@ -131,7 +131,7 @@ export function ReplyTrackerEmails({
       const message = thread.messages.at(-1)!;
 
       if (action === "reply") {
-        if (!isGmail) {
+        if (!canReplyInApp) {
           showReplyNotSupportedToast();
           return;
         }
@@ -142,7 +142,7 @@ export function ReplyTrackerEmails({
         await handleResolve(thread.id, false);
       }
     },
-    [sortedThreads, handleResolve, isGmail],
+    [sortedThreads, handleResolve, canReplyInApp],
   );
 
   const { selectedIndex, setSelectedIndex, getRefCallback } =
@@ -384,10 +384,10 @@ function NudgeButton({
 }) {
   const showNudge = type === ThreadTrackerType.AWAITING;
   const { provider } = useAccount();
-  const isGmail = isGoogleProvider(provider);
+  const canReplyInApp = isGoogleProvider(provider) || isImapProvider(provider);
 
   const handleClick = () => {
-    if (!isGmail) {
+    if (!canReplyInApp) {
       showReplyNotSupportedToast();
       return;
     }

@@ -8,7 +8,7 @@ import { useThread } from "@/hooks/useThread";
 import { LoadingContent } from "@/components/LoadingContent";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAccount } from "@/providers/EmailAccountProvider";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import { isGoogleProvider, isImapProvider } from "@/utils/email/provider-types";
 import { MutedText } from "@/components/Typography";
 
 export function EmailViewer() {
@@ -27,7 +27,7 @@ export function EmailViewer() {
         className="overflow-y-auto bg-slate-100 p-0"
         overlay="transparent"
       >
-        {isGoogleProvider(provider) ? (
+        {isGoogleProvider(provider) || isImapProvider(provider) ? (
           threadId && (
             <ThreadContent
               threadId={threadId}
@@ -37,7 +37,9 @@ export function EmailViewer() {
           )
         ) : (
           <div className="flex h-full items-center justify-center">
-            <MutedText>This feature isn't enabled for Outlook.</MutedText>
+            <MutedText>
+              This feature isn't enabled for this provider yet.
+            </MutedText>
           </div>
         )}
       </SheetContent>

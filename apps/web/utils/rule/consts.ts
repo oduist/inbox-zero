@@ -1,5 +1,8 @@
 import { DEFAULT_COLD_EMAIL_PROMPT } from "@/utils/cold-email/prompt";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { ActionType, SystemType } from "@/generated/prisma/enums";
 import { env } from "@/env";
 
@@ -150,7 +153,8 @@ export function isEligibleForClassificationFeedback(
 export function getCategoryAction(systemType: SystemType, provider: string) {
   const config = getRuleConfig(systemType);
 
-  if (isMicrosoftProvider(provider)) {
+  // Folder-based providers (Outlook, IMAP) move to a folder rather than label.
+  if (isMicrosoftProvider(provider) || isImapProvider(provider)) {
     return config.categoryActionMicrosoft || config.categoryAction;
   }
 

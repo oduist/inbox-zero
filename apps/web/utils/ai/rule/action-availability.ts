@@ -1,6 +1,9 @@
 import { env } from "@/env";
 import { ActionType } from "@/generated/prisma/enums";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 
 export function getAvailableActionsForRuleEditor({
   provider,
@@ -12,8 +15,10 @@ export function getAvailableActionsForRuleEditor({
   const includesExistingActionType = (actionType: ActionType) =>
     existingActionTypes.includes(actionType);
 
+  // Folder-based providers (Outlook, IMAP) support moving to a folder.
   const supportsMoveFolder =
     isMicrosoftProvider(provider) ||
+    isImapProvider(provider) ||
     includesExistingActionType(ActionType.MOVE_FOLDER);
   // The rule editor exposes a single "Draft reply" option for both persisted
   // draft action variants, so the UI only needs the normalized DRAFT_EMAIL type.
