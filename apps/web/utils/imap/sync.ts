@@ -50,10 +50,14 @@ export async function syncFolder({
   pool,
   emailAccountId,
   folder,
+  limit,
 }: {
   pool: ImapPool;
   emailAccountId: string;
   folder: string;
+  /** On the first sync of a folder, only fetch roughly the most recent N
+   * messages (by UID). Ignored once the folder has prior sync state. */
+  limit?: number;
 }): Promise<{ added: number }> {
   return pool.withMailbox(folder, async (client) => {
     const mailbox = client.mailbox;
@@ -64,6 +68,12 @@ export async function syncFolder({
     const state = await readFolderState({ emailAccountId, folder });
 
     let sinceUid = 0;
+    if (limit && !state) {
+      // Bound the initial fetch to the most recent messages by UID.
+      const uidNextValue = mailbox ? mailbox.uidNext : undefined;
+      const uidNext = uidNextValue ? Number(uidNextValue) : 0;
+      sinceUid = Math.max(0, uidNext - 1 - limit);
+    }
     if (state && state.uidValidity === uidValidity) {
       sinceUid = state.highestUid;
       const useModSeqDelta = condstore && !!state.highestModSeq;
